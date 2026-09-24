@@ -1,0 +1,190 @@
+---
+title: "DATA301 Assignment 4"
+author: "Keiko Rayner"
+date: "2026-09-23"
+output:
+  pdf_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exercise 1
+
+**Part 1**   
+
+Wicklin (2017) compared 9 different definitions of quantiles which commonly appear in statistical software packages. Each quantile definition/type uses a different method to caluate quantiles. The findings of this article build upon Hyndman and Fan's (1996) work. 
+
+Wicklin used a small sample of 10 observations (x = {0, 1, 1, 1, 2, 2, 2, 4, 5, 8}) to compare the quantile definitions. The cumulative proportions were plotted for each quantile definition/function and displayed in a 3x3 grid for visual comparison. All quantile functions had the same basic shape but Types 1, 2, and 3 used rounding - a discrete method. The remaining types used linear interpolation which is a continuous method.
+
+Overlaying different quantile functions showed that different methods created slightly different shapes. In practice, the choice of quantile definition doesn't matter too much for moderately sized or large datasets (n >= 100). For smaller datasets, the choice of quantile definition does influence quantile values. In this case a quantile method shuold be selected based on which properties suit the context best.
+
+R's deftault quantile definition is type 7, which is continuous. I would use R's default since the exponential distribution is also continuous.
+
+**Part 2 - Bootstrap Bias Corrected Estimator** 
+
+
+```{r, error=TRUE}
+
+set.seed(0)
+
+#biased estimator function - lambda_iqr
+lambda_iqr <- function(x) {
+  quartiles <- quantile(x, probs = c(0.25, 0.75), type=7)
+  return(log(3) / (quartiles[2] - quartiles[1]))
+}
+
+####BOOTSTRAP ESTIMATE
+
+#bootstrap sampling
+bootstrap_correction <- function(x, n, nboot=200) {
+  
+  #calculates the biased estimator
+  lambda_hat_iqr <- lambda_iqr(x)
+
+  #creates multiple sames
+  boot_lambda_iqr <- rep(NA, nboot)
+  
+  for(i in 1:nboot)
+  {
+    boot_sample <- sample(x = x, size = n, replace = TRUE)
+    quartiles <- quantile(boot_sample, probs = c(0.25, 0.75), type=7)
+    iqr <- quartiles[2]-quartiles[1]
+    boot_lambda_iqr[i] <- if (iqr == 0) NA_real_ else log(3) / iqr
+  }
+  
+  #takes average of bs samples to calculate bias corrected estimator
+  mean_boot_lambda_iqr <- mean(boot_lambda_iqr, na.rm = TRUE)
+  bias_estimate <- mean_boot_lambda_iqr - lambda_hat_iqr
+  lambda_tilde <- lambda_hat_iqr - bias_estimate
+  
+  return(lambda_tilde)
+}
+
+```
+
+**Part 3 - Monte Carlo Experiment for Estimator Comparison** 
+
+
+```{r}
+#first estimator
+lambda_ml <- function(x) {
+  return(1 / mean(x))
+}
+
+#specify values for the monte carlo simulation matrix
+lambda_params <- c(0.1, 1, 10)
+n_params <- c(5, 30, 100)
+num_reps <- 2000
+
+results <- data.frame()
+
+#goes through each possible combination of lambda and n parameters
+for (lamb in lambda_params) {
+  for (n in n_params) {
+
+    #creates vectors for each estimator to store simulated estimates
+    ml_vals <- numeric(num_reps)
+    iqr_vals <- numeric(num_reps)
+    bc_vals <- numeric(num_reps)
+
+    for (r in 1:num_reps) {
+      #creates a fake sample of exp dist
+      x <- rexp(n, rate = lamb)
+      
+      #holds estimates for each rep
+      ml_vals[r] <- lambda_ml(x)
+      iqr_vals[r] <- lambda_iqr(x)
+      bc_vals[r] <- bootstrap_correction(x, n)  
+    }
+
+    #calculates and stores MSEs for each param combo and estimator
+    results <- rbind(results, data.frame(lambda = lamb, n = n,
+      mse_ml = mean((ml_vals - lamb)^2),
+      mse_iqr = mean((iqr_vals - lamb)^2),
+      mse_bc = mean((bc_vals - lamb)^2, na.rm = TRUE)
+    ))
+  }
+}
+
+print(results, digits = 4)    
+    
+```
+
+## Exercise 2
+
+**Question 1**   
+
+The frequency of the time series data is 4 measurements per year as verified by the following code.
+
+```{r, error=TRUE}
+library(fpp2) 
+
+frequency(ausbeer)
+
+plot(ausbeer, 
+     main = "Quarterly Beer Production in Australia over Time", 
+     xlab = "Year", 
+     ylab = "Beer Production (Megalitres)")
+
+```
+
+**Question 2**   
+
+Up until about 1975 there appears to be an upward trend with beer production increasing overall. From 1975 onwards, there is a very gradual downward trend in beer production, indicating that slightly less beer is produced each year. It appears as if this trend could continue beyond 2010.
+
+
+**Question 3**   
+There appears to be a seasonal pattern but it is difficult to identify exactly what that is without a seasonal plot. From the overall plot above I would assume that the seasonal pattern repeats on a yearly basis with some quarters having higher or lower average beer production than others. I counted 10 peaks between 1980 and 1990 which supports this.
+
+
+**Question 4**   
+We can use the aggregate function to determine the standard deviations for each year which can give us some indication of how variability changes over time. In the plot below we see how the standard deviation of beer production changes each year. It appears that the variability increases until around 1975, flattens out until around 1990, and then starts to decrease after that.
+
+```{r, error=TRUE}
+#finds sd for each year
+yearly_sd <- aggregate(ausbeer, nfrequency = 1, FUN = sd)
+plot(yearly_sd, 
+     main = "Variability of Beer Production each Year", 
+     xlab = "Year", 
+     ylab = "Variabiltiy (Standard Deviation per Year)")
+
+
+```
+
+**Question 5**   
+
+At around 1975 the trend appears to shift from moderately upward to gradually downward which seems a bit strange. Another set of unusual points are the two very large peaks at aroung 1990 which are noticeably higher then the surrounding peaks.
+
+**Question 6**   
+
+As shown in the following plot, there appears to be a seasonal pattern in beer production. On average, beer production seems to be highest in the 4th quarter and lowest in the 2nd quarter each year. This plot makes it much easier to identify seasonal patters as well as see how different years compare with one another.
+
+```{r, error=TRUE}
+library(tsibble)
+aus_beer_df <- as_tsibble(ausbeer)
+
+ggseasonplot(ausbeer, continuous=TRUE) +
+  labs(
+    title = "Seasonal Plot of Beer Production in Australia",
+    x = "Quarter",
+    y = "Beer Production (Megalitres)"
+  ) +
+  scale_colour_gradientn(colours = rainbow(7), name="Year")
+
+```
+
+**Question 7**   
+
+As mentioned earlier, the 4th quarter tends to have the highest beer production and the 2nd quarter tends to have the lowest. The shape within each seasonal subplot is roughly similar which indicates the seasonal pattern is table over time.
+
+```{r, error=TRUE}
+ggsubseriesplot(ausbeer) +
+  ylab("Beer Production (Megalitres)") + ggtitle("Seasonal subseries plot")
+
+```
+
+**Question 8**   
+
+Detrending seems appropriate since there appears to be a tread in beer productino over time. To fit a model, constant mean is assumed and detrending is required to satisfy this assumption. Transformation also seems appropriate since variance appears non-constant across time as shown in the seasonal plot and variance plots produced earlier.
